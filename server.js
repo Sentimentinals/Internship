@@ -334,7 +334,7 @@ app.post('/users/:id/upload-photo', uploadSingle, async (req, res) => {
   }
 });
 
-// API Get User Photo - GET /users/:id/photo
+// API Get User Photo - GET /users/:id/photo (Redirect to image)
 app.get('/users/:id/photo', async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
@@ -360,7 +360,7 @@ app.get('/users/:id/photo', async (req, res) => {
       return res.redirect(user.photo);
     }
 
-    // Nếu là S3 file, tạo presigned URL mới
+    // Nếu là S3 file, tạo presigned URL mới và redirect
     try {
       const { generatePresignedUrl } = require('./config/aws-s3');
       
@@ -392,6 +392,86 @@ app.get('/users/:id/photo', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Lỗi server khi lấy ảnh',
+      error: error.message
+    });
+  }
+});
+
+// API Get User Photo URL - GET /users/:id/photo-url (Return presigned URL as JSON)
+app.get('/users/:id/photo-url', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    
+    // Kiểm tra user có tồn tại không
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User không tồn tại'
+      });
+    }
+
+    if (!user.photo) {
+      return res.status(404).json({
+        success: false,
+        message: 'User chưa có ảnh đại diện'
+      });
+    }
+
+    // Nếu là local file, return local URL
+    if (!user.photo.includes('amazonaws.com')) {
+      return res.json({
+        success: true,
+        message: 'Local photo URL',
+        data: {
+          url: `http://localhost:${PORT}${user.photo}`,
+          type: 'local',
+          expires: null
+        }
+      });
+    }
+
+    // Nếu là S3 file, tạo presigned URL mới
+    try {
+      const { generatePresignedUrl } = require('./config/aws-s3');
+      
+      // Extract key từ URL cũ
+      const urlParts = user.photo.split('/');
+      const key = `user-photos/${urlParts[urlParts.length - 1].split('?')[0]}`;
+      
+      const presignedResult = await generatePresignedUrl(key, 604800); // 7 days
+      
+      if (presignedResult.success) {
+        return res.json({
+          success: true,
+          message: 'S3 presigned URL generated',
+          data: {
+            url: presignedResult.url,
+            type: 's3',
+            expires: '7 days',
+            key: key
+          }
+        });
+      } else {
+        return res.status(500).json({
+          success: false,
+          message: 'Không thể tạo presigned URL',
+          error: presignedResult.error
+        });
+      }
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Lỗi khi tạo presigned URL',
+        error: error.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Get photo URL error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server khi lấy photo URL',
       error: error.message
     });
   }

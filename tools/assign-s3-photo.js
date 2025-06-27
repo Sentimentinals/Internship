@@ -1,7 +1,7 @@
-require('dotenv').config();
-const User = require('./models/User');
-const { generatePresignedUrl, listS3Objects } = require('./config/aws-s3');
-const { initDatabase } = require('./config/init-db');
+require('dotenv').config({ path: '../.env' });
+const User = require('../models/User');
+const { generatePresignedUrl, listS3Objects } = require('../config/aws-s3');
+const { initDatabase } = require('../config/init-db');
 
 async function assignS3PhotoToUser(userId, s3Key) {
     console.log(`🔗 Gán ảnh S3 cho User ID ${userId}...`);
@@ -44,20 +44,25 @@ async function assignS3PhotoToUser(userId, s3Key) {
             console.log(`📸 User chưa có ảnh`);
         }
         
-        // Tạo fake S3 URL pattern để endpoint /users/:id/photo có thể xử lý
-        // Pattern: https://bucket.s3.region.amazonaws.com/key?params
-        const fakeS3Url = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}?assigned=true`;
+        // Tạo presigned URL dài hạn (7 ngày) để lưu vào database
+        console.log(`🔗 Tạo presigned URL dài hạn...`);
+        const longTermPresigned = await generatePresignedUrl(s3Key, 604800); // 7 days
         
-        // Cập nhật database với S3 URL pattern
+        if (!longTermPresigned.success) {
+            console.log(`❌ Không thể tạo presigned URL: ${longTermPresigned.error}`);
+            return;
+        }
+        
+        // Cập nhật database với presigned URL thực
         await user.update({
-            photo: fakeS3Url
+            photo: longTermPresigned.url
         });
         
         console.log(`✅ Gán ảnh thành công!`);
         console.log(`📁 S3 Key: ${s3Key}`);
-        console.log(`📸 Database URL: ${fakeS3Url}`);
+        console.log(`📸 Database URL: ${longTermPresigned.url.substring(0, 100)}...`);
         console.log(`🔗 Xem ảnh: http://localhost:3001/users/${userId}/photo`);
-        console.log(`💡 URL sẽ được tự động refresh mỗi lần xem`);
+        console.log(`⏰ Presigned URL valid 7 ngày`);
         
     } catch (error) {
         console.error('❌ Assign photo error:', error);
