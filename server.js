@@ -7,6 +7,7 @@ require('dotenv').config();
 
 // Import database
 const { initDatabase } = require('./config/init-db');
+const { sequelize } = require('./config/database');
 const User = require('./models/User');
 
 // Import upload config
@@ -20,6 +21,10 @@ const {
   getUploadInfo, 
   UPLOAD_MODE 
 } = require('./config/upload');
+
+// Import các modules mới
+const analytics = require('./config/analytics');
+const batchOperations = require('./tools/batch-operations');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -472,6 +477,86 @@ app.post('/users/:id/upload-photo-local', uploadSingleLocal, async (req, res) =>
       error: error.message
     });
   }
+});
+
+// Serve static files from public directory
+app.use(express.static('public'));
+
+// Dashboard route
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+// Analytics API endpoint
+app.get('/api/analytics', async (req, res) => {
+    try {
+        // Update storage stats trước khi trả về
+        const [users] = await sequelize.query('SELECT * FROM users');
+        await analytics.updateStorageStats(users);
+        
+        const analyticsData = analytics.getAnalytics();
+        const dailyStats = analytics.getDailyStats(7);
+        
+        res.json({
+            ...analyticsData,
+            dailyStats
+        });
+    } catch (error) {
+        console.error('Error fetching analytics:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy analytics data'
+        });
+    }
+});
+
+// Batch operations API endpoints
+app.post('/api/batch/migrate-all-s3', async (req, res) => {
+    try {
+        const result = await batchOperations.migrateAllToS3(sequelize);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: `Lỗi migration: ${error.message}`
+        });
+    }
+});
+
+app.post('/api/batch/cleanup-unused', async (req, res) => {
+    try {
+        const result = await batchOperations.cleanupUnusedFiles(sequelize);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: `Lỗi cleanup: ${error.message}`
+        });
+    }
+});
+
+app.post('/api/batch/bulk-assign-s3', async (req, res) => {
+    try {
+        const result = await batchOperations.bulkAssignS3Photos(sequelize);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: `Lỗi bulk assign: ${error.message}`
+        });
+    }
+});
+
+app.post('/api/batch/verify-integrity', async (req, res) => {
+    try {
+        const result = await batchOperations.verifyFileIntegrity(sequelize);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: `Lỗi verification: ${error.message}`
+        });
+    }
 });
 
 // Middleware xử lý lỗi 404
