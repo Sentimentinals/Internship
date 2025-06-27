@@ -111,29 +111,28 @@ AWS_S3_BUCKET=your-bucket-name
 
 ## 🧪 **TESTING & TOOLS**
 
-### **Kiểm tra S3 Status**
+### **Management Tools**
 ```bash
-# Detailed analysis
-node check-s3-status.js
+# Storage Migration Tools (trong thư mục tools/)
+node tools/migrate-user-storage.js <userId> <mode>
+node tools/assign-s3-photo.js list
+node tools/assign-s3-photo.js assign <userId> <fileName>
 
-# Quick check với PowerShell  
-powershell -ExecutionPolicy Bypass -File check-s3.ps1
+# Xem hướng dẫn chi tiết
+cat tools/README.md
 ```
 
 ### **CLI Management**
 ```bash
 # Interactive CLI
 node scripts/cli.js
-
-# PowerShell helpers
-./add-user.ps1
-./test-reorder.ps1
 ```
 
-### **Test Upload**
+### **Database Status**
 ```bash
-# Test hybrid upload system
-node test-hybrid-upload.js
+# Kiểm tra users hiện tại
+node scripts/cli.js
+# Chọn option "List all users" để xem database stats
 ```
 
 ## 📊 **TRẠNG THÁI PROJECT**
@@ -169,12 +168,16 @@ node test-hybrid-upload.js
 ├── 📂 scripts/         # CLI tools
 │   ├── cli.js          # Interactive CLI (100 lines)
 │   └── utils.js        # Utility functions (282 lines)
-├── 📂 uploads/         # Local file storage
-├── 📄 server.js        # Main server (442 lines)
+├── 📂 tools/           # Management tools
+│   ├── assign-s3-photo.js    # Gán ảnh S3 có sẵn cho user
+│   ├── migrate-user-storage.js # Migrate ảnh Local ↔ S3
+│   └── README.md             # Hướng dẫn sử dụng tools
+├── 📂 uploads/         # Local file storage (cleaned)
+├── 📄 server.js        # Main server (536 lines)
 ├── 📄 package.json     # Dependencies
-├── 📄 add-user.ps1     # PowerShell add user
-├── 📄 test-reorder.ps1 # PowerShell test reorder
-├── 📄 aws-s3-setup-guide.md # AWS S3 setup guide (322 lines)
+├── 📄 aws-s3-setup-guide.md # AWS S3 setup guide (335 lines)
+├── 📄 huong-dan-upload.md   # Upload system guide (175 lines)
+├── 📄 HUONG_DAN_CAI_DAT.md  # Installation guide (121 lines)
 └── 📄 README.md        # This file
 ```
 
