@@ -12,8 +12,10 @@ const User = require('./models/User');
 // Import upload config
 const { 
   uploadSingle, 
+  uploadSingleLocal,
   handleUploadError, 
   processUploadedFile, 
+  processUploadedFileLocal,
   deleteUploadedFile, 
   getUploadInfo, 
   UPLOAD_MODE 
@@ -59,7 +61,8 @@ app.get('/', async (req, res) => {
       'PUT /users/:id': 'Cập nhật user theo ID',
       'DELETE /users/:id': 'Xóa user theo ID (auto reorder)',
       'POST /users/reorder': 'Reorder tất cả user IDs thủ công',
-      'POST /users/:id/upload-photo': 'Upload ảnh đại diện cho user'
+      'POST /users/:id/upload-photo': 'Upload ảnh đại diện cho user',
+      'POST /users/:id/upload-photo-local': 'Force local upload'
     },
     uploadInfo
   });
@@ -261,105 +264,137 @@ app.delete('/users/:id', async (req, res) => {
   }
 });
 
-// API Users - POST /users/:id/upload-photo (Upload ảnh đại diện cho user - Hybrid Local/S3)
-app.post('/users/:id/upload-photo', (req, res) => {
-  const userId = parseInt(req.params.id);
-  
-  // Kiểm tra user tồn tại trước
-  User.findByPk(userId).then(user => {
+// API Users - POST /users/:id/upload-photo
+app.post('/users/:id/upload-photo', uploadSingle, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    
+    // Kiểm tra user có tồn tại không
+    const user = await User.findByPk(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'Không tìm thấy user'
+        message: 'User không tồn tại'
       });
     }
+
+    // Kiểm tra file upload
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không có file ảnh được upload'
+      });
+    }
+
+    // Process uploaded file
+    const result = await processUploadedFile(req.file, req.file.originalname);
     
-    // Thực hiện upload
-    uploadSingle(req, res, async (err) => {
-      if (err) {
-        return handleUploadError(err, req, res);
-      }
-      
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          message: 'Vui lòng chọn file ảnh để upload'
-        });
-      }
-      
-      let oldPhotoUrl = user.photo; // Lưu URL ảnh cũ để xóa sau
-      
-      try {
-        // Process uploaded file (local hoặc S3)
-        const fileResult = await processUploadedFile(req.file);
-        
-        // Cập nhật photo URL vào database
-        await user.update({ photo: fileResult.url });
-        
-        // Xóa ảnh cũ nếu có (sau khi upload thành công)
-        if (oldPhotoUrl) {
-          try {
-            await deleteUploadedFile(oldPhotoUrl);
-          } catch (deleteError) {
-            console.warn('⚠️ Không thể xóa ảnh cũ:', deleteError.message);
-          }
-        }
-        
-        // Trả về thông tin ảnh đã upload
-        res.json({
-          success: true,
-          message: `Upload ảnh đại diện thành công (${fileResult.mode})`,
-          data: {
-            user: user,
-            photo: {
-              mode: fileResult.mode,
-              filename: fileResult.filename,
-              originalName: fileResult.originalName,
-              size: fileResult.size,
-              mimetype: fileResult.mimetype,
-              url: fileResult.url,
-              ...(fileResult.mode === 's3' && {
-                bucket: fileResult.bucket,
-                etag: fileResult.etag
-              }),
-              ...(fileResult.mode === 'local' && {
-                localPath: fileResult.path
-              })
-            }
-          }
-        });
-        
-      } catch (error) {
-        // Xóa file đã upload nếu có lỗi database (chỉ cho local)
-        if (req.file && req.file.path && UPLOAD_MODE === 'local') {
-          try {
-            fs.unlinkSync(req.file.path);
-          } catch (unlinkError) {
-            console.warn('⚠️ Không thể xóa file temp:', unlinkError.message);
-          }
-        }
-        
-        res.status(500).json({
-          success: false,
-          message: 'Lỗi khi upload ảnh',
-          error: error.message
-        });
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Upload ảnh thất bại',
+        error: result.error
+      });
+    }
+
+    // Xóa ảnh cũ nếu có
+    if (user.photo) {
+      await deleteUploadedFile(user.photo);
+    }
+
+    // Cập nhật database với đường dẫn ảnh mới
+    await user.update({
+      photo: result.data.url
+    });
+
+    // Lấy thông tin user đã cập nhật
+    const updatedUser = await User.findByPk(userId);
+
+    res.json({
+      success: true,
+      message: `Upload ảnh đại diện thành công (${result.data.mode})`,
+      data: {
+        user: updatedUser,
+        photo: result.data
       }
     });
-    
-  }).catch(error => {
+
+  } catch (error) {
+    console.error('Upload error:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server khi kiểm tra user',
+      message: 'Lỗi server khi upload ảnh',
       error: error.message
     });
-  });
+  }
 });
 
-// Serve static files từ thư mục uploads (chỉ cho local mode)
-if (UPLOAD_MODE === 'local') {
-  app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-}
+// API Get User Photo - GET /users/:id/photo
+app.get('/users/:id/photo', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    
+    // Kiểm tra user có tồn tại không
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User không tồn tại'
+      });
+    }
+
+    if (!user.photo) {
+      return res.status(404).json({
+        success: false,
+        message: 'User chưa có ảnh đại diện'
+      });
+    }
+
+    // Nếu là local file, redirect đến static file
+    if (!user.photo.includes('amazonaws.com')) {
+      return res.redirect(user.photo);
+    }
+
+    // Nếu là S3 file, tạo presigned URL mới
+    try {
+      const { generatePresignedUrl } = require('./config/aws-s3');
+      
+      // Extract key từ URL cũ
+      const urlParts = user.photo.split('/');
+      const key = `user-photos/${urlParts[urlParts.length - 1].split('?')[0]}`;
+      
+      const presignedResult = await generatePresignedUrl(key, 3600); // 1 hour
+      
+      if (presignedResult.success) {
+        return res.redirect(presignedResult.url);
+      } else {
+        return res.status(500).json({
+          success: false,
+          message: 'Không thể tạo URL xem ảnh',
+          error: presignedResult.error
+        });
+      }
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Lỗi khi tạo URL xem ảnh',
+        error: error.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Get photo error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server khi lấy ảnh',
+      error: error.message
+    });
+  }
+});
+
+// Serve static files từ thư mục uploads (cho cả local và S3 mode)
+// Cần thiết cho hybrid system: có thể có cả local và S3 files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // API Users - POST /users/reorder (Reorder tất cả user IDs)
 app.post('/users/reorder', async (req, res) => {
@@ -382,6 +417,63 @@ app.post('/users/reorder', async (req, res) => {
   }
 });
 
+// API Users - POST /users/:id/upload-photo-local (Force local upload)
+app.post('/users/:id/upload-photo-local', uploadSingleLocal, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    
+    // Kiểm tra user có tồn tại không
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User không tồn tại'
+      });
+    }
+
+    // Kiểm tra file upload
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không có file ảnh được upload'
+      });
+    }
+
+    // Process uploaded file with forced local mode
+    const result = await processUploadedFileLocal(req.file);
+
+    // Xóa ảnh cũ nếu có (chỉ xóa local files)
+    if (user.photo && user.photo.startsWith('/uploads/')) {
+      await deleteUploadedFile(user.photo);
+    }
+
+    // Cập nhật database với đường dẫn ảnh local
+    await user.update({
+      photo: result.url
+    });
+
+    // Lấy thông tin user đã cập nhật
+    const updatedUser = await User.findByPk(userId);
+
+    res.json({
+      success: true,
+      message: `Upload ảnh đại diện thành công (LOCAL mode - forced)`,
+      data: {
+        user: updatedUser,
+        photo: result
+      }
+    });
+
+  } catch (error) {
+    console.error('Upload local error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server khi upload ảnh local',
+      error: error.message
+    });
+  }
+});
+
 // Middleware xử lý lỗi 404
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -397,7 +489,8 @@ app.use('*', (req, res) => {
       'PUT /users/:id',
       'DELETE /users/:id',
       'POST /users/reorder',
-      'POST /users/:id/upload-photo'
+      'POST /users/:id/upload-photo',
+      'POST /users/:id/upload-photo-local'
     ]
   });
 });
@@ -416,6 +509,7 @@ app.listen(PORT, async () => {
   console.log(`   DELETE /users/:id - Xóa user khỏi DB (auto reorder)`);
   console.log(`   POST /users/reorder - Reorder tất cả user IDs`);
   console.log(`   POST /users/:id/upload-photo - Upload ảnh đại diện`);
+  console.log(`   POST /users/:id/upload-photo-local - Force local upload`);
   console.log(`💾 Database: MySQL + Sequelize ORM`);
   console.log(`🔄 Auto ID Reorder: Enabled`);
   

@@ -169,10 +169,42 @@ const getUploadInfo = async () => {
 // Middleware upload single file với field name "photo"
 const uploadSingle = upload.single('photo');
 
+// Process uploaded file with forced mode
+const processUploadedFileLocal = async (file) => {
+  if (!file) {
+    throw new Error('Không có file được upload');
+  }
+
+  // Force local storage mode
+  return {
+    mode: 'local',
+    filename: file.filename,
+    url: `/uploads/${file.filename}`,
+    size: file.size,
+    mimetype: file.mimetype,
+    originalName: file.originalname,
+    path: file.path
+  };
+};
+
+// Force local upload multer config
+const localUpload = multer({
+  storage: storage, // Always use disk storage for local
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: process.env.MAX_FILE_SIZE || 5 * 1024 * 1024, // Default 5MB
+    files: 1 // Chỉ cho phép upload 1 file
+  }
+});
+
+const uploadSingleLocal = localUpload.single('photo');
+
 module.exports = {
   uploadSingle,
+  uploadSingleLocal,
   handleUploadError,
   processUploadedFile,
+  processUploadedFileLocal,
   deleteUploadedFile,
   getUploadInfo,
   UPLOAD_MODE

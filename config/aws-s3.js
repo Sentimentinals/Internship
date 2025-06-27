@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
@@ -58,7 +58,6 @@ const uploadToS3 = async (file, originalFilename = null) => {
             Key: fileName,
             Body: file.buffer,
             ContentType: file.mimetype,
-            ACL: 'public-read', // Make file publicly accessible
             Metadata: {
                 'original-name': originalFilename || 'unknown',
                 'upload-timestamp': new Date().toISOString(),
@@ -68,8 +67,13 @@ const uploadToS3 = async (file, originalFilename = null) => {
         const command = new PutObjectCommand(uploadParams);
         const result = await s3Client.send(command);
         
-        // Generate public URL
-        const fileUrl = `https://${bucketName}.s3.${s3Config.region}.amazonaws.com/${fileName}`;
+        // Generate presigned URL since ACL is not allowed
+        const getCommand = new GetObjectCommand({
+            Bucket: bucketName,
+            Key: fileName,
+        });
+        
+        const fileUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 * 24 * 7 }); // 7 days
         
         return {
             success: true,
@@ -146,13 +150,55 @@ const generatePresignedUrl = async (fileKey, expiresIn = 3600) => {
     }
 };
 
+// List objects in S3 bucket
+const listS3Objects = async (prefix = '') => {
+    try {
+        validateAWSConfig();
+        
+        const command = new ListObjectsV2Command({
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 100
+        });
+        
+        const result = await s3Client.send(command);
+        
+        if (!result.Contents || result.Contents.length === 0) {
+            return {
+                success: true,
+                data: [],
+                message: 'No objects found'
+            };
+        }
+        
+        const objects = result.Contents.map(obj => ({
+            key: obj.Key,
+            size: obj.Size,
+            lastModified: obj.LastModified,
+            etag: obj.ETag
+        }));
+        
+        return {
+            success: true,
+            data: objects,
+            count: objects.length
+        };
+        
+    } catch (error) {
+        console.error('❌ S3 List Error:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
 // Test S3 connection
 const testS3Connection = async () => {
     try {
         validateAWSConfig();
         
         // Try to list objects (just to test connection)
-        const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
         const command = new ListObjectsV2Command({
             Bucket: bucketName,
             MaxKeys: 1
@@ -182,6 +228,7 @@ module.exports = {
     uploadToS3,
     deleteFromS3,
     generatePresignedUrl,
+    listS3Objects,
     testS3Connection,
     validateAWSConfig,
     generateFileName

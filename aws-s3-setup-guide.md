@@ -320,3 +320,16 @@ Bucket Structure:
 - Regular backup verification
 
 **🎉 Happy S3 Integration!** ☁️📸 
+
+# Test quyền đã hoạt động chưa
+node -e "
+const AWS = require('@aws-sdk/client-s3');
+const s3 = new AWS.S3Client({
+  region: 'ap-southeast-1',
+  credentials: {
+    accessKeyId: 'YOUR_ACCESS_KEY',
+    secretAccessKey: 'YOUR_SECRET_KEY'
+  }
+});
+console.log('S3 Client created successfully!');
+" 
