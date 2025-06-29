@@ -689,6 +689,75 @@ app.post('/api/batch/verify-integrity', async (req, res) => {
     }
 });
 
+// API Get Direct S3 URL - GET /users/:id/direct-url
+app.get('/users/:id/direct-url', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User không tồn tại'
+      });
+    }
+
+    if (!user.photo) {
+      return res.status(404).json({
+        success: false,
+        message: 'User chưa có ảnh đại diện'
+      });
+    }
+
+    // S3 direct URL
+    if (user.photo.startsWith('/user-photos/')) {
+      const s3Domain = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com`;
+      const directUrl = s3Domain + user.photo;
+      
+      return res.json({
+        success: true,
+        message: 'Direct S3 URL từ database URI',
+        data: {
+          url: directUrl,
+          type: 's3-direct',
+          uri: user.photo,
+          domain: s3Domain,
+          public: true
+        }
+      });
+    }
+
+    // Local file URL
+    if (user.photo.startsWith('/uploads/')) {
+      const localUrl = `http://localhost:${process.env.PORT || 3001}${user.photo}`;
+      
+      return res.json({
+        success: true,
+        message: 'Local file URL',
+        data: {
+          url: localUrl,
+          type: 'local',
+          uri: user.photo,
+          public: false
+        }
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Format ảnh không được hỗ trợ'
+    });
+
+  } catch (error) {
+    console.error('Get direct URL error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server khi lấy direct URL',
+      error: error.message
+    });
+  }
+});
+
 // Middleware xử lý lỗi 404
 app.use('*', (req, res) => {
   res.status(404).json({
