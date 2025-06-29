@@ -99,12 +99,13 @@ const processUploadedFile = async (file) => {
     return {
       mode: 's3',
       filename: s3Result.data.key,
-      url: s3Result.data.url,
+      url: `/${s3Result.data.key}`,
       size: s3Result.data.size,
       mimetype: s3Result.data.mimetype,
       originalName: s3Result.data.originalName,
       bucket: s3Result.data.bucket,
-      etag: s3Result.data.etag
+      etag: s3Result.data.etag,
+      s3Key: s3Result.data.key
     };
   } else {
     // Local storage
@@ -124,8 +125,13 @@ const processUploadedFile = async (file) => {
 const deleteUploadedFile = async (photoUrl) => {
   if (!photoUrl) return { success: true };
 
-  if (UPLOAD_MODE === 's3' && photoUrl.includes('amazonaws.com')) {
-    // Extract S3 key from URL
+  if (photoUrl.startsWith('/user-photos/')) {
+    // S3 URI path format - Remove leading slash để get S3 key
+    const s3Key = photoUrl.substring(1);
+    const deleteResult = await deleteFromS3(s3Key);
+    return deleteResult;
+  } else if (UPLOAD_MODE === 's3' && photoUrl.includes('amazonaws.com')) {
+    // Legacy S3 full URL format - Extract S3 key from URL
     const urlParts = photoUrl.split('/');
     const key = urlParts.slice(-2).join('/'); // user-photos/uuid.ext
     

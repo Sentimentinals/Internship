@@ -355,37 +355,48 @@ app.get('/users/:id/photo', async (req, res) => {
       });
     }
 
-    // Nếu là local file, redirect đến static file
-    if (!user.photo.includes('amazonaws.com')) {
+    // Nếu là local file (starts with /uploads/), redirect đến static file
+    if (user.photo.startsWith('/uploads/')) {
       return res.redirect(user.photo);
     }
 
-    // Nếu là S3 file, tạo presigned URL mới và redirect
-    try {
-      const { generatePresignedUrl } = require('./config/aws-s3');
-      
-      // Extract key từ URL cũ
-      const urlParts = user.photo.split('/');
-      const key = `user-photos/${urlParts[urlParts.length - 1].split('?')[0]}`;
-      
-      const presignedResult = await generatePresignedUrl(key, 3600); // 1 hour
-      
-      if (presignedResult.success) {
-        return res.redirect(presignedResult.url);
-      } else {
+    // Nếu là S3 URI path (starts with /user-photos/), tạo presigned URL và redirect
+    if (user.photo.startsWith('/user-photos/')) {
+      try {
+        const { generatePresignedUrl } = require('./config/aws-s3');
+        
+        // Remove leading slash để get S3 key
+        const s3Key = user.photo.substring(1);
+        
+        const presignedResult = await generatePresignedUrl(s3Key, 3600); // 1 hour
+        
+        if (presignedResult.success) {
+          return res.redirect(presignedResult.url);
+        } else {
+          return res.status(500).json({
+            success: false,
+            message: 'Không thể tạo URL xem ảnh',
+            error: presignedResult.error
+          });
+        }
+      } catch (error) {
         return res.status(500).json({
           success: false,
-          message: 'Không thể tạo URL xem ảnh',
-          error: presignedResult.error
+          message: 'Lỗi khi tạo URL xem ảnh',
+          error: error.message
         });
       }
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: 'Lỗi khi tạo URL xem ảnh',
-        error: error.message
-      });
     }
+
+    // Fallback cho URLs cũ (backwards compatibility)
+    if (user.photo.includes('amazonaws.com')) {
+      return res.redirect(user.photo);
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Format ảnh không được hỗ trợ'
+    });
 
   } catch (error) {
     console.error('Get photo error:', error);
@@ -418,54 +429,93 @@ app.get('/users/:id/photo-url', async (req, res) => {
       });
     }
 
-    // Nếu là local file, return local URL
-    if (!user.photo.includes('amazonaws.com')) {
+    // Nếu là local file (starts with /uploads/), return local URL
+    if (user.photo.startsWith('/uploads/')) {
       return res.json({
         success: true,
         message: 'Local photo URL',
         data: {
           url: `http://localhost:${PORT}${user.photo}`,
           type: 'local',
-          expires: null
+          expires: null,
+          path: user.photo
         }
       });
     }
 
-    // Nếu là S3 file, tạo presigned URL mới
-    try {
-      const { generatePresignedUrl } = require('./config/aws-s3');
-      
-      // Extract key từ URL cũ
+    // Nếu là S3 URI path (starts with /user-photos/), tạo presigned URL
+    if (user.photo.startsWith('/user-photos/')) {
+      try {
+        const { generatePresignedUrl } = require('./config/aws-s3');
+        
+        // Remove leading slash để get S3 key
+        const s3Key = user.photo.substring(1);
+        
+        const presignedResult = await generatePresignedUrl(s3Key, 604800); // 7 days
+        
+        if (presignedResult.success) {
+          return res.json({
+            success: true,
+            message: 'S3 presigned URL generated từ URI path',
+            data: {
+              url: presignedResult.url,
+              type: 's3',
+              expires: '7 days',
+              key: s3Key,
+              path: user.photo
+            }
+          });
+        } else {
+          return res.status(500).json({
+            success: false,
+            message: 'Không thể tạo presigned URL',
+            error: presignedResult.error
+          });
+        }
+      } catch (error) {
+        return res.status(500).json({
+          success: false,
+          message: 'Lỗi khi tạo presigned URL',
+          error: error.message
+        });
+      }
+    }
+
+    // Fallback cho URLs cũ (backwards compatibility)
+    if (user.photo.includes('amazonaws.com')) {
       const urlParts = user.photo.split('/');
       const key = `user-photos/${urlParts[urlParts.length - 1].split('?')[0]}`;
       
-      const presignedResult = await generatePresignedUrl(key, 604800); // 7 days
-      
-      if (presignedResult.success) {
-        return res.json({
-          success: true,
-          message: 'S3 presigned URL generated',
-          data: {
-            url: presignedResult.url,
-            type: 's3',
-            expires: '7 days',
-            key: key
-          }
-        });
-      } else {
+      try {
+        const { generatePresignedUrl } = require('./config/aws-s3');
+        const presignedResult = await generatePresignedUrl(key, 604800);
+        
+        if (presignedResult.success) {
+          return res.json({
+            success: true,
+            message: 'S3 presigned URL (legacy format)',
+            data: {
+              url: presignedResult.url,
+              type: 's3',
+              expires: '7 days',
+              key: key,
+              legacy: true
+            }
+          });
+        }
+      } catch (error) {
         return res.status(500).json({
           success: false,
-          message: 'Không thể tạo presigned URL',
-          error: presignedResult.error
+          message: 'Lỗi với legacy URL format',
+          error: error.message
         });
       }
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: 'Lỗi khi tạo presigned URL',
-        error: error.message
-      });
     }
+
+    return res.status(400).json({
+      success: false,
+      message: 'Format ảnh không được hỗ trợ'
+    });
 
   } catch (error) {
     console.error('Get photo URL error:', error);

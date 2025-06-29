@@ -44,25 +44,19 @@ async function assignS3PhotoToUser(userId, s3Key) {
             console.log(`📸 User chưa có ảnh`);
         }
         
-        // Tạo presigned URL dài hạn (7 ngày) để lưu vào database
-        console.log(`🔗 Tạo presigned URL dài hạn...`);
-        const longTermPresigned = await generatePresignedUrl(s3Key, 604800); // 7 days
+        // Lưu URI path thay vì full URL để dễ thay đổi CDN sau này
+        const uriPath = `/${s3Key}`;
         
-        if (!longTermPresigned.success) {
-            console.log(`❌ Không thể tạo presigned URL: ${longTermPresigned.error}`);
-            return;
-        }
-        
-        // Cập nhật database với presigned URL thực
+        // Cập nhật database với URI path
         await user.update({
-            photo: longTermPresigned.url
+            photo: uriPath
         });
         
         console.log(`✅ Gán ảnh thành công!`);
         console.log(`📁 S3 Key: ${s3Key}`);
-        console.log(`📸 Database URL: ${longTermPresigned.url.substring(0, 100)}...`);
+        console.log(`📸 Database URI: ${uriPath}`);
         console.log(`🔗 Xem ảnh: http://localhost:3001/users/${userId}/photo`);
-        console.log(`⏰ Presigned URL valid 7 ngày`);
+        console.log(`💡 Database chỉ lưu URI path, server sẽ generate full URL khi cần`);
         
     } catch (error) {
         console.error('❌ Assign photo error:', error);

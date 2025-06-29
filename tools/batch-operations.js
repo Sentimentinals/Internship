@@ -64,15 +64,15 @@ async function migrateAllToS3(sequelize) {
 
                 await s3Client.send(new PutObjectCommand(uploadParams));
 
-                // Update database
-                const s3Url = `https://${process.env.AWS_S3_BUCKET}.s3.amazonaws.com/${s3Key}`;
+                // Update database với URI path thay vì full URL
+                const uriPath = `/${s3Key}`;
                 await sequelize.query(
                     'UPDATE users SET photo = ? WHERE id = ?',
-                    { replacements: [s3Url, user.id] }
+                    { replacements: [uriPath, user.id] }
                 );
 
                 results.migrated++;
-                results.details.push(`✅ Migrated User ${user.id} (${user.name}): ${fileName}`);
+                results.details.push(`✅ Migrated User ${user.id} (${user.name}): ${fileName} -> ${uriPath}`);
 
                 // Optional: Delete local file after successful upload
                 // fs.unlinkSync(localPath);
@@ -238,15 +238,17 @@ async function bulkAssignS3Photos(sequelize) {
             try {
                 const user = usersWithoutPhotos[i];
                 const photo = shuffledPhotos[i];
-                const s3Url = `https://${process.env.AWS_S3_BUCKET}.s3.amazonaws.com/${photo.Key}`;
+                
+                // Lưu URI path thay vì full URL
+                const uriPath = `/${photo.Key}`;
 
                 await sequelize.query(
                     'UPDATE users SET photo = ? WHERE id = ?',
-                    { replacements: [s3Url, user.id] }
+                    { replacements: [uriPath, user.id] }
                 );
 
                 results.assigned++;
-                results.details.push(`📸 Assigned ${path.basename(photo.Key)} to User ${user.id} (${user.name})`);
+                results.details.push(`📸 Assigned ${path.basename(photo.Key)} to User ${user.id} (${user.name}) -> ${uriPath}`);
 
             } catch (error) {
                 results.errors++;
@@ -299,10 +301,11 @@ async function verifyFileIntegrity(sequelize) {
 
         for (const user of users) {
             try {
-                if (user.photo.includes('amazonaws.com')) {
-                    // Verify S3 photo
+                if (user.photo.startsWith('/user-photos/')) {
+                    // Verify S3 photo bằng URI path
+                    const s3Key = user.photo.substring(1); // Remove leading slash
+                    
                     try {
-                        const s3Key = user.photo.split('.com/')[1];
                         const listParams = {
                             Bucket: process.env.AWS_S3_BUCKET,
                             Prefix: s3Key,
@@ -321,6 +324,30 @@ async function verifyFileIntegrity(sequelize) {
                     } catch (error) {
                         results.s3Invalid++;
                         results.details.push(`❌ S3 Error: User ${user.id} - ${error.message}`);
+                    }
+                    
+                } else if (user.photo.includes('amazonaws.com')) {
+                    // Legacy full URL format - Verify S3 photo
+                    try {
+                        const s3Key = user.photo.split('.com/')[1];
+                        const listParams = {
+                            Bucket: process.env.AWS_S3_BUCKET,
+                            Prefix: s3Key,
+                            MaxKeys: 1
+                        };
+                        
+                        const result = await s3Client.send(new ListObjectsV2Command(listParams));
+                        
+                        if (result.Contents && result.Contents.length > 0) {
+                            results.s3Valid++;
+                            results.details.push(`✅ S3 OK (Legacy): User ${user.id} - ${path.basename(s3Key)}`);
+                        } else {
+                            results.s3Invalid++;
+                            results.details.push(`❌ S3 Missing (Legacy): User ${user.id} - ${user.photo}`);
+                        }
+                    } catch (error) {
+                        results.s3Invalid++;
+                        results.details.push(`❌ S3 Error (Legacy): User ${user.id} - ${error.message}`);
                     }
                     
                 } else if (user.photo.startsWith('/uploads/')) {
