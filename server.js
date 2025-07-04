@@ -29,6 +29,16 @@ const batchOperations = require('./tools/batch-operations');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Memory cleanup middleware
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    // Clear request-specific data to prevent memory leaks
+    req.body = null;
+    req.files = null;
+  });
+  next();
+});
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());

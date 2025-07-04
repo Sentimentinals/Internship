@@ -60,12 +60,12 @@ const sequelize = new Sequelize({
   // username: process.env.RDS_USERNAME,
   // password: process.env.RDS_PASSWORD,
   
-  // Cấu hình pool connection
+  // Cấu hình pool connection - OPTIMIZED
   pool: {
     max: 10,
-    min: 0,
+    min: 2,          // Tăng từ 0 để maintain connections
     acquire: 30000,
-    idle: 10000
+    idle: 30000      // Tăng từ 10000 để tránh frequent reconnection
   },
   
   // Logging
